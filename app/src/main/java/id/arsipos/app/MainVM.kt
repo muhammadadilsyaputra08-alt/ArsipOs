@@ -40,10 +40,14 @@ class MainVM(app: Application) : AndroidViewModel(app) {
 
     fun refresh() {
         viewModelScope.launch(Dispatchers.IO) {
-            val r = db.search(query, typeFilter, yearFilter, monthFilter, statusFilter)
-            val c = db.counts()
-            val y = db.years()
-            withContext(Dispatchers.Main) { docs = r; counts = c; years = y }
+            try {
+                val r = db.search(query, typeFilter, yearFilter, monthFilter, statusFilter)
+                val c = db.counts()
+                val y = db.years()
+                withContext(Dispatchers.Main) { docs = r; counts = c; years = y }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { message = "Database error: ${e.message}" }
+            }
         }
     }
 

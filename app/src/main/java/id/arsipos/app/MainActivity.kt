@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -63,11 +64,44 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { App() } }
+        setContent { MaterialTheme { Root() } }
+    }
+}
+
+@Composable
+fun Root() {
+    val ctx = LocalContext.current
+    var crash by remember {
+        mutableStateOf(
+            try {
+                File(ctx.filesDir, "crash.txt").takeIf { it.exists() }?.readText()
+            } catch (e: Exception) {
+                null
+            }
+        )
+    }
+    LaunchedEffect(Unit) {
+        try { File(ctx.filesDir, "launching").delete() } catch (_: Exception) {}
+    }
+    val c = crash
+    if (c != null) {
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            Text("Aplikasi crash sebelumnya. Salin teks di bawah dan kirim ke pengembang.", style = MaterialTheme.typography.titleSmall)
+            Box(Modifier.weight(1f).padding(vertical = 8.dp).verticalScroll(rememberScrollState())) {
+                SelectionContainer { Text(c.take(6000), style = MaterialTheme.typography.bodySmall) }
+            }
+            Button(onClick = {
+                File(ctx.filesDir, "crash.txt").delete()
+                crash = null
+            }) { Text("Hapus laporan & lanjut") }
+        }
+    } else {
+        App()
     }
 }
 

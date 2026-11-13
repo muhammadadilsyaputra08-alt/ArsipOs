@@ -70,7 +70,7 @@ class ArchiveDb(ctx: Context) : SQLiteOpenHelper(ctx, "arsip.db", null, 1) {
                 year INTEGER, month INTEGER, content TEXT)"""
         )
         db.execSQL(
-            "CREATE VIRTUAL TABLE docs_fts USING fts4(file_name, doc_type, doc_number, subject, institution, content, tokenize=unicode61)"
+            "CREATE VIRTUAL TABLE docs_fts USING fts4(file_name, doc_type, doc_number, subject, institution, content)"
         )
         db.execSQL("CREATE INDEX idx_docs_type ON docs(doc_type)")
         db.execSQL("CREATE INDEX idx_docs_ym ON docs(year, month)")
