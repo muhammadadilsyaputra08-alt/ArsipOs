@@ -160,6 +160,7 @@ object Telegram {
             } catch (e: TgException) {
                 if ("not found" !in e.desc.lowercase()) throw e
             }
+            Unit
         }
     }
 
@@ -206,6 +207,7 @@ object Telegram {
                 } finally {
                     if (part.exists()) part.delete()
                 }
+                Unit
             }
         }
 

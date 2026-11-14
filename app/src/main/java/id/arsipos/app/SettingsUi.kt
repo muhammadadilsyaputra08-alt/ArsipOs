@@ -114,10 +114,10 @@ fun SettingsScreen(vm: MainVM, onPickBackup: () -> Unit) {
             }
         }
         Row(
-            Modifier.clickable { vm.setSecureScreen(!vm.secureScreen) },
+            Modifier.clickable { vm.applySecureScreen(!vm.secureScreen) },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Checkbox(vm.secureScreen, { vm.setSecureScreen(it) })
+            Checkbox(vm.secureScreen, { vm.applySecureScreen(it) })
             Text("Blokir screenshot & pratinjau di daftar aplikasi terbaru")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

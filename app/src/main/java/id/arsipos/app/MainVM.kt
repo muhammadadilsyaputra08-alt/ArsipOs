@@ -612,7 +612,7 @@ class MainVM(app: Application) : AndroidViewModel(app) {
     fun unlockBio() { locked = false; leftAt = 0L }
     fun verifyApp(pin: String): PinResult = store.check("app", pin)
 
-    fun setSecureScreen(on: Boolean) { store.secureScreen = on; secureScreen = on }
+    fun applySecureScreen(on: Boolean) { store.secureScreen = on; secureScreen = on }
 
     fun setBiometric(on: Boolean) { store.biometric = on; biometricOn = on }
 
