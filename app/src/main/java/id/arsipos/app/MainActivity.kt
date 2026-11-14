@@ -2,51 +2,43 @@
 
 package id.arsipos.app
 
-import android.content.Intent
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.view.WindowManager
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -59,23 +51,38 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.ViewModelProvider
 import java.io.File
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
+    private val vm by lazy { ViewModelProvider(this)[MainVM::class.java] }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { Root() } }
+        setContent { ArsipTheme { Root(vm) } }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        vm.onForegrounded()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        vm.onBackgrounded()
     }
 }
 
 @Composable
-fun Root() {
+fun Root(vm: MainVM) {
     val ctx = LocalContext.current
     var crash by remember {
         mutableStateOf(
@@ -89,6 +96,14 @@ fun Root() {
     LaunchedEffect(Unit) {
         try { File(ctx.filesDir, "launching").delete() } catch (_: Exception) {}
     }
+    // Pratinjau aplikasi terbaru disembunyikan saat terkunci, atau selalu jika dipilih di Pengaturan.
+    val hide = vm.secureScreen || vm.locked
+    LaunchedEffect(hide) {
+        ctx.findActivity()?.window?.let {
+            if (hide) it.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            else it.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
     val c = crash
     if (c != null) {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -101,19 +116,31 @@ fun Root() {
                 crash = null
             }) { Text("Hapus laporan & lanjut") }
         }
-    } else {
-        App()
+        return
     }
+
+    when {
+        !vm.setupDone || vm.wizardOpen -> WizardScreen(vm)
+        vm.locked -> LockScreen(vm)
+        else -> MainScreen(vm)
+    }
+    ActionPinHost(vm)
 }
 
 @Composable
-fun App(vm: MainVM = viewModel()) {
+fun MainScreen(vm: MainVM) {
     val ctx = LocalContext.current
     val snack = remember { SnackbarHostState() }
     var tab by remember { mutableIntStateOf(0) }
+    var showNote by remember { mutableStateOf(false) }
+    var showLink by remember { mutableStateOf(false) }
+    var showHybrid by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         if (u != null) vm.pick(u)
+    }
+    val restorePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        if (u != null) vm.loadRestore(u)
     }
 
     LaunchedEffect(vm.message) {
@@ -122,17 +149,42 @@ fun App(vm: MainVM = viewModel()) {
     LaunchedEffect(vm.toOpen) {
         vm.toOpen?.let { (f, mime) ->
             val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
-            val i = Intent(Intent.ACTION_VIEW)
+            val i = android.content.Intent(android.content.Intent.ACTION_VIEW)
                 .setDataAndType(uri, mime)
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             try { ctx.startActivity(i) } catch (e: Exception) { vm.message = "Tidak ada aplikasi untuk membuka file ini" }
             vm.toOpen = null
         }
     }
+    LaunchedEffect(vm.toLink) {
+        vm.toLink?.let {
+            if (!openUrl(ctx, it)) vm.message = "Tidak bisa membuka Telegram"
+            vm.toLink = null
+        }
+    }
+    LaunchedEffect(tab) {
+        if (tab == 0) vm.settingsUnlocked = false
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
-        topBar = { TopAppBar(title = { Text("ArsipOS") }) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(painterResource(R.drawable.ic_launcher_foreground), null, Modifier.size(44.dp))
+                        Column {
+                            Text("ArsipOS", fontWeight = FontWeight.SemiBold)
+                            ConnLine(vm.conn)
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF1E3A8A),
+                    titleContentColor = Color.White
+                )
+            )
+        },
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
@@ -147,166 +199,119 @@ fun App(vm: MainVM = viewModel()) {
         },
         floatingActionButton = {
             if (tab == 0) {
-                FloatingActionButton(onClick = {
-                    picker.launch(
-                        arrayOf(
-                            "application/pdf",
-                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            "image/*"
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SmallFloatingActionButton(onClick = { showNote = true }) { Icon(Icons.Default.Edit, "Catat teks") }
+                    SmallFloatingActionButton(onClick = { showLink = true }) { Text("🔗") }
+                    FloatingActionButton(onClick = {
+                        picker.launch(
+                            arrayOf(
+                                "application/pdf",
+                                "application/msword",
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                "application/vnd.ms-excel",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                "application/vnd.ms-powerpoint",
+                                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                "application/zip",
+                                "application/vnd.rar",
+                                "application/x-rar-compressed",
+                                "image/*"
+                            )
                         )
-                    )
-                }) { Icon(Icons.Default.Add, "Unggah") }
+                    }) { Icon(Icons.Default.Add, "Unggah") }
+                }
             }
         }
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
-            if (tab == 0) ArchiveScreen(vm) else SettingsScreen(vm)
-            if (vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (tab == 0) {
+                ArchiveScreen(vm)
+            } else if (vm.settingsUnlocked) {
+                SettingsScreen(vm) { restorePicker.launch(arrayOf("*/*")) }
+            } else {
+                SettingsGate(vm) { tab = 0 }
+            }
+            Box(Modifier.align(Alignment.TopCenter)) { ProgressBar(vm) }
         }
     }
 
     vm.draft?.let { DraftDialog(vm, it) }
+    vm.oversize?.let { OversizeDialog(vm, it) { showHybrid = true } }
+    if (showHybrid) HybridDialog(vm) { showHybrid = false }
+    if (showNote) NoteDialog(vm) { showNote = false }
+    if (showLink) LinkDialog(vm) { showLink = false }
+    vm.detail?.let { DetailDialog(vm, it) }
+    vm.editing?.let { EditDialog(vm, it) }
+    vm.deleting?.let { DeleteDialog(vm, it) }
+    vm.restorePending?.let { RestoreDialog(vm, it) }
 }
 
 @Composable
-fun ArchiveScreen(vm: MainVM) {
-    var del by remember { mutableStateOf<Doc?>(null) }
-
-    Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = vm.query,
-            onValueChange = { vm.query = it; vm.refresh() },
-            modifier = Modifier.fillMaxWidth().padding(12.dp, 8.dp),
-            placeholder = { Text("Cari nomor, perihal, instansi, isi…") },
-            leadingIcon = { Icon(Icons.Default.Search, null) },
-            singleLine = true
-        )
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            item {
-                FilterChip(
-                    selected = vm.typeFilter == null,
-                    onClick = { vm.typeFilter = null; vm.refresh() },
-                    label = { Text("Semua (${vm.counts.values.sum()})") }
-                )
-            }
-            items(TYPES) { t ->
-                FilterChip(
-                    selected = vm.typeFilter == t,
-                    onClick = { vm.typeFilter = t; vm.refresh() },
-                    label = { Text("$t (${vm.counts[t] ?: 0})") }
-                )
-            }
-        }
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Picker("Tahun", vm.yearFilter?.toString() ?: "Semua", listOf("Semua") + vm.years.map { it.toString() }) {
-                vm.yearFilter = it.toIntOrNull(); vm.refresh()
-            }
-            Picker("Bulan", vm.monthFilter?.let { MONTHS[it - 1] } ?: "Semua", listOf("Semua") + MONTHS) {
-                val i = MONTHS.indexOf(it)
-                vm.monthFilter = if (i < 0) null else i + 1; vm.refresh()
-            }
-            Picker("Status", vm.statusFilter ?: "Semua", listOf("Semua") + STATUSES) {
-                vm.statusFilter = if (it == "Semua") null else it; vm.refresh()
-            }
-        }
-        if (vm.docs.isEmpty()) {
-            Text("Belum ada arsip. Tekan + untuk mengunggah.", Modifier.padding(16.dp))
-        } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(vm.docs, key = { it.id }) { d ->
-                    ListItem(
-                        modifier = Modifier.clickable { vm.open(d) },
-                        headlineContent = { Text(d.subject.ifBlank { d.fileName }, maxLines = 2) },
-                        supportingContent = {
-                            Text(
-                                "${d.type} • ${d.number.ifBlank { "-" }} • ${d.date.ifBlank { "${d.year}-${"%02d".format(d.month)}" }}" +
-                                    "\n${d.institution} • ${d.status}",
-                                maxLines = 3
-                            )
-                        },
-                        trailingContent = {
-                            IconButton(onClick = { del = d }) { Icon(Icons.Default.Delete, "Hapus") }
-                        }
-                    )
-                }
-            }
-        }
-    }
-
-    del?.let { d ->
-        AlertDialog(
-            onDismissRequest = { del = null },
-            title = { Text("Hapus dari indeks?") },
-            text = { Text("Metadata dihapus dari database lokal. File di Telegram tidak terhapus.") },
-            confirmButton = { TextButton(onClick = { vm.delete(d); del = null }) { Text("Hapus") } },
-            dismissButton = { TextButton(onClick = { del = null }) { Text("Batal") } }
-        )
-    }
-}
-
-@Composable
-fun Picker(label: String, current: String, options: List<String>, onPick: (String) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        OutlinedButton(onClick = { open = true }) { Text("$label: $current", maxLines = 1, softWrap = false) }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            options.forEach { o ->
-                DropdownMenuItem(text = { Text(o) }, onClick = { onPick(o); open = false })
-            }
-        }
-    }
-}
-
-@Composable
-fun DraftDialog(vm: MainVM, d: Draft) {
-    AlertDialog(
-        onDismissRequest = { if (!vm.busy) vm.draft = null },
-        title = { Text("Periksa metadata") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(d.name, style = MaterialTheme.typography.labelMedium)
-                Picker("Jenis", d.type, TYPES) { vm.draft = d.copy(type = it) }
-                OutlinedTextField(d.number, { vm.draft = d.copy(number = it) }, label = { Text("Nomor") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(d.date, { vm.draft = d.copy(date = it) }, label = { Text("Tanggal (YYYY-MM-DD)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(d.subject, { vm.draft = d.copy(subject = it) }, label = { Text("Perihal") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(d.institution, { vm.draft = d.copy(institution = it) }, label = { Text("Instansi") }, modifier = Modifier.fillMaxWidth())
-                Picker("Status", d.status, STATUSES) { vm.draft = d.copy(status = it) }
-            }
-        },
-        confirmButton = { Button(onClick = { vm.save() }, enabled = !vm.busy) { Text("Simpan") } },
-        dismissButton = { TextButton(onClick = { vm.draft = null }, enabled = !vm.busy) { Text("Batal") } }
+fun SettingsGate(vm: MainVM, onCancel: () -> Unit) {
+    val ctx = LocalContext.current
+    val bio = vm.biometricOn && canBiometric(ctx)
+    PinDialog(
+        title = "PIN Utama",
+        subtitle = "Masukkan PIN Utama untuk membuka Pengaturan",
+        verify = { vm.verifyApp(it) },
+        onOk = { vm.settingsUnlocked = true },
+        onCancel = onCancel,
+        onBiometric = if (bio) {
+            { ctx.findActivity()?.let { showBiometric(it, "Buka Pengaturan") { vm.settingsUnlocked = true } } }
+        } else null
     )
 }
 
 @Composable
-fun SettingsScreen(vm: MainVM) {
-    Column(
-        Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text("Telegram Bot sebagai penyimpanan file", style = MaterialTheme.typography.titleMedium)
-        Text("Buat bot lewat @BotFather, tambahkan bot sebagai admin channel/grup arsip, lalu isi token dan chat ID (contoh: -100123456789).")
-        OutlinedTextField(
-            value = vm.token, onValueChange = { vm.token = it },
-            label = { Text("Bot token") }, singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = vm.chatId, onValueChange = { vm.chatId = it },
-            label = { Text("Chat ID") }, singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { vm.saveSettings() }) { Text("Simpan") }
-            OutlinedButton(onClick = { vm.testConnection() }) { Text("Tes koneksi") }
-        }
-        Text("Batas Bot API: unggah maks 50 MB, unduh langsung maks 20 MB (file lebih besar dikirim ulang ke chat).", style = MaterialTheme.typography.bodySmall)
+fun ConnLine(s: ConnState) {
+    val green = Color(0xFF86EFAC)
+    val red = Color(0xFFFCA5A5)
+    val gray = Color(0xFFCBD5E1)
+    when (s) {
+        is ConnState.Ok -> Text("● Terhubung ke: ${s.title}", color = green, style = MaterialTheme.typography.labelSmall)
+        is ConnState.Bad -> Text("● ${s.msg}", color = red, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+        is ConnState.Offline -> Text("● Offline (data lokal tetap bisa dicari)", color = gray, style = MaterialTheme.typography.labelSmall)
+        is ConnState.Checking -> Text("● Memeriksa koneksi…", color = gray, style = MaterialTheme.typography.labelSmall)
+        is ConnState.None -> Text("● Belum terhubung ke Telegram", color = red, style = MaterialTheme.typography.labelSmall)
     }
+}
+
+@Composable
+fun RestoreDialog(vm: MainVM, rp: RestorePending) {
+    var pw by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { if (!vm.busy) vm.restorePending = null },
+        title = { Text("Pulihkan backup") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Gabungkan: hanya menambah data yang belum ada.\n" +
+                        "Timpa semua: menghapus seluruh data lokal, lalu menggantinya dengan isi backup termasuk PIN dari backup.\n" +
+                        "Anda akan diminta PIN Keamanan Aksi."
+                )
+                if (rp.encrypted) {
+                    OutlinedTextField(
+                        pw, { pw = it }, label = { Text("Kata sandi backup") }, singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                ProgressBar(vm)
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !vm.busy && (!rp.encrypted || pw.isNotEmpty()),
+                onClick = { vm.guard("Pulihkan backup") { vm.performRestore(false, pw) } }
+            ) { Text("Gabungkan") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { vm.restorePending = null }, enabled = !vm.busy) { Text("Batal") }
+                TextButton(
+                    enabled = !vm.busy && (!rp.encrypted || pw.isNotEmpty()),
+                    onClick = { vm.guard("Timpa semua data dengan backup") { vm.performRestore(true, pw) } }
+                ) { Text("Timpa semua") }
+            }
+        }
+    )
 }

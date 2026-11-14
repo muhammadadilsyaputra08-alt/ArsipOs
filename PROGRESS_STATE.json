@@ -1,10 +1,17 @@
 {
   "project": "ArsipOS",
   "stack": "Android native (Kotlin + Jetpack Compose), SQLite FTS4, OkHttp, PDFBox-Android, ML Kit OCR",
-  "current_phase": "Fase 2: Implementasi selesai, menunggu build CI pertama",
-  "architecture_summary": "Data.kt (SQLite+FTS4, Prefs), Extractor.kt (PDF/DOCX/OCR + regex metadata), Telegram.kt (sendDocument/getFile), MainVM.kt, MainActivity.kt (Compose UI). CI: .github/workflows/build-apk.yml",
+  "current_phase": "Fase 3: QA - identitas visual terkunci, hardening diterapkan, menunggu build CI",
+  "architecture_summary": "Secure.kt (Keystore+Dual-PIN), Data.kt (SQLite v2, kategori, tag, FTS), Telegram.kt (API, error ID, progress), Compressor.kt, Backup.kt (AES opsional), MainVM.kt, UI: Wizard/PinUi/ArchiveUi/SettingsUi/MainActivity",
   "verified_files": [],
-  "pending_tasks": ["Build pertama di GitHub Actions", "Opsional: signing release"],
-  "known_issues": ["Belum dikompilasi lokal (tanpa Android SDK di sandbox)"],
-  "last_updated": "2026-11-13"
+  "pending_tasks": [
+    "Build di GitHub Actions (job build + test)",
+    "Uji manual di perangkat"
+  ],
+  "known_issues": [
+    "Belum dikompilasi/diuji di perangkat (sandbox tanpa Android SDK)",
+    "dependency-audit: SKIPPED",
+    "Tes E2E belum ada"
+  ],
+  "last_updated": "2026-11-14"
 }
