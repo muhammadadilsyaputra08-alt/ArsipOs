@@ -10,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -36,12 +37,22 @@ class MainVM(app: Application) : AndroidViewModel(app) {
     var token by mutableStateOf(prefs.token)
     var chatId by mutableStateOf(prefs.chatId)
 
-    init { refresh() }
+    init {
+        viewModelScope.launch {
+            yield() // tunggu snapshot komposisi diterapkan sebelum membaca state
+            refresh()
+        }
+    }
 
     fun refresh() {
+        val q = query
+        val tf = typeFilter
+        val yf = yearFilter
+        val mf = monthFilter
+        val sf = statusFilter
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val r = db.search(query, typeFilter, yearFilter, monthFilter, statusFilter)
+                val r = db.search(q, tf, yf, mf, sf)
                 val c = db.counts()
                 val y = db.years()
                 withContext(Dispatchers.Main) { docs = r; counts = c; years = y }

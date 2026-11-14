@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -200,7 +201,7 @@ fun ArchiveScreen(vm: MainVM) {
             }
         }
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Picker("Tahun", vm.yearFilter?.toString() ?: "Semua", listOf("Semua") + vm.years.map { it.toString() }) {
@@ -253,7 +254,7 @@ fun ArchiveScreen(vm: MainVM) {
 fun Picker(label: String, current: String, options: List<String>, onPick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        OutlinedButton(onClick = { open = true }) { Text("$label: $current") }
+        OutlinedButton(onClick = { open = true }) { Text("$label: $current", maxLines = 1, softWrap = false) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             options.forEach { o ->
                 DropdownMenuItem(text = { Text(o) }, onClick = { onPick(o); open = false })
