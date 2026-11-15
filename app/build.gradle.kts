@@ -11,13 +11,27 @@ android {
         applicationId = "id.arsipos.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0.0"
+        versionCode = 3
+        versionName = "2.1.0"
+    }
+
+    // Kunci rilis dibaca dari environment (GitHub Secrets). Tidak ada rahasia di repo.
+    val releaseKeystore: String? = System.getenv("ARSIPOS_KEYSTORE")
+    signingConfigs {
+        create("release") {
+            if (releaseKeystore != null) {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("ARSIPOS_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ARSIPOS_KEY_ALIAS")
+                keyPassword = System.getenv("ARSIPOS_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = if (releaseKeystore != null) signingConfigs.getByName("release") else null
         }
     }
 
