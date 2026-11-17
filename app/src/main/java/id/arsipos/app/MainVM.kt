@@ -1,6 +1,7 @@
 package id.arsipos.app
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -9,6 +10,7 @@ import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.IntentCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +33,9 @@ sealed class ConnState {
 class Oversize(val uri: Uri, val name: String, val mime: String, val size: Long)
 class PinReq(val title: String, val action: () -> Unit)
 class RestorePending(val text: String, val encrypted: Boolean)
+class SharedText(val subject: String, val text: String, val url: String?)
+
+private const val MAX_SHARE = 50
 
 fun caption(title: String, category: String, tags: String): String {
     val sb = StringBuilder("📌 ").append(title)
@@ -89,6 +94,20 @@ class MainVM(app: Application) : AndroidViewModel(app) {
     var biometricOn by mutableStateOf(store.biometric)
     var secureScreen by mutableStateOf(store.secureScreen)
     var lastBackup by mutableStateOf(store.lastBackup)
+
+    // ----- tema -----
+    var themeId by mutableStateOf(store.themeId)
+    var themeMode by mutableStateOf(store.themeMode)
+    var bgIntensity by mutableStateOf(store.bgIntensity)
+    var bgAnimated by mutableStateOf(store.bgAnimated)
+
+    // ----- antrean impor -----
+    var queue by mutableStateOf<List<QueueItem>>(emptyList())
+    var queueOpen by mutableStateOf(false)
+    var queueEditing by mutableStateOf<QueueItem?>(null)
+    var queueMsg by mutableStateOf<String?>(null)
+    var sharedText by mutableStateOf<SharedText?>(null)
+    private var seq = 0
     private var leftAt = 0L
     private var lastPct = -1
 
@@ -96,7 +115,214 @@ class MainVM(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             yield() // tunggu snapshot komposisi diterapkan sebelum membaca state
             refresh()
+            refreshQueue()
             checkConnection()
+        }
+    }
+
+    // ================= tema =================
+
+    fun chooseTheme(id: String) { store.themeId = id; themeId = id }
+    fun chooseMode(m: Int) { store.themeMode = m; themeMode = m }
+    fun chooseIntensity(v: Float) { bgIntensity = v }
+    fun commitIntensity() { store.bgIntensity = bgIntensity }
+    fun chooseAnimated(on: Boolean) { store.bgAnimated = on; bgAnimated = on }
+
+    // ================= antrean impor (Send Intent) =================
+
+    fun refreshQueue() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val q = db.queueAll()
+                withContext(Dispatchers.Main) {
+                    queue = q
+                    if (q.isEmpty()) queueOpen = false
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { message = "Database error: ${e.message}" }
+            }
+        }
+    }
+
+    /** Menangani ACTION_SEND / ACTION_SEND_MULTIPLE. Hanya URI content:// yang diterima. */
+    fun handleShare(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
+        val hint = intent.type
+        val uris = mutableListOf<Uri>()
+        if (action == Intent.ACTION_SEND) {
+            IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { uris += it }
+        } else {
+            IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { uris += it }
+        }
+        if (uris.isEmpty()) {
+            val cd = intent.clipData
+            if (cd != null) for (i in 0 until cd.itemCount) cd.getItemAt(i).uri?.let { uris += it }
+        }
+        if (uris.isNotEmpty()) {
+            enqueue(uris, hint)
+        } else if (action == Intent.ACTION_SEND) {
+            val t = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+            if (t.isNotEmpty()) {
+                val url = Regex("https?://\\S+").find(t)?.value
+                sharedText = SharedText(intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty(), t.take(20000), url)
+            }
+        }
+        // Cegah pemrosesan ulang saat Activity dibuat ulang (rotasi) dari intent yang sama.
+        intent.action = null
+        intent.removeExtra(Intent.EXTRA_STREAM)
+        intent.removeExtra(Intent.EXTRA_TEXT)
+        intent.clipData = null
+    }
+
+    fun enqueue(input: List<Uri>, hint: String? = null) {
+        val list = input.filter { it.scheme == "content" }.distinct()
+        val rejected = input.size - list.size
+        val use = list.take(MAX_SHARE)
+        val cut = list.size - use.size
+        if (use.isEmpty()) {
+            if (input.isNotEmpty()) message = "Sumber file tidak didukung"
+            return
+        }
+        viewModelScope.launch {
+            busy = true
+            var ok = 0
+            var big = 0
+            var fail = 0
+            try {
+                withContext(Dispatchers.IO) {
+                    val dir = File(ctx.filesDir, "queue").apply { mkdirs() }
+                    for (u in use) {
+                        var f: File? = null
+                        try {
+                            val (name, size) = meta(u)
+                            if (size > Telegram.MAX_UPLOAD) { big++; continue }
+                            val mime = ctx.contentResolver.getType(u) ?: hint?.takeIf { !it.endsWith("/*") } ?: "application/octet-stream"
+                            val ext = name.substringAfterLast('.', "").filter { it.isLetterOrDigit() }.take(8)
+                            val dest = File(dir, "${System.currentTimeMillis()}_${seq++}" + if (ext.isNotEmpty()) ".$ext" else "")
+                            f = dest
+                            var copied = 0L
+                            var tooBig = false
+                            val ins = ctx.contentResolver.openInputStream(u) ?: throw java.io.IOException("tidak bisa dibuka")
+                            ins.use { i ->
+                                dest.outputStream().use { o ->
+                                    val buf = ByteArray(64 * 1024)
+                                    while (true) {
+                                        val n = i.read(buf)
+                                        if (n < 0) break
+                                        copied += n
+                                        if (copied > Telegram.MAX_UPLOAD) { tooBig = true; break }
+                                        o.write(buf, 0, n)
+                                    }
+                                }
+                            }
+                            if (tooBig) { dest.delete(); big++; continue }
+                            val title = name.substringBeforeLast('.', name).ifBlank { name }
+                            db.queueAdd(QueueItem(path = dest.absolutePath, origName = name, name = title, mime = mime, size = copied))
+                            ok++
+                        } catch (e: Exception) {
+                            f?.delete()
+                            fail++
+                        }
+                    }
+                }
+                val q = withContext(Dispatchers.IO) { db.queueAll() }
+                queue = q
+                if (ok > 0) queueOpen = true
+                val parts = mutableListOf<String>()
+                if (ok > 0) parts += "$ok file masuk antrean"
+                if (big > 0) parts += "$big file > 50 MB dilewati"
+                if (fail > 0) parts += "$fail gagal dibaca"
+                if (rejected > 0) parts += "$rejected sumber ditolak"
+                if (cut > 0) parts += "$cut melebihi batas $MAX_SHARE file"
+                if (parts.isNotEmpty()) message = parts.joinToString(", ")
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun updateQueue(q: QueueItem) {
+        queue = queue.map { if (it.id == q.id) q else it }
+        viewModelScope.launch(Dispatchers.IO) { try { db.queueUpdate(q) } catch (_: Exception) {} }
+    }
+
+    fun deleteQueue(q: QueueItem) {
+        queue = queue.filter { it.id != q.id }
+        if (queue.isEmpty()) queueOpen = false
+        viewModelScope.launch(Dispatchers.IO) {
+            try { db.queueDelete(q.id); File(q.path).delete() } catch (_: Exception) {}
+        }
+    }
+
+    fun applyToAll(category: String?, tagsRaw: String?) {
+        val tg = tagsRaw?.let { normTags(it) }
+        queue = queue.map { it.copy(category = category ?: it.category, tags = tg ?: it.tags) }
+        viewModelScope.launch(Dispatchers.IO) { try { db.queueBulk(category, tg) } catch (_: Exception) {} }
+    }
+
+    fun saveQueue() {
+        if (!store.ready) { message = "Hubungkan bot Telegram dulu di Pengaturan"; return }
+        val items = queue.toList()
+        if (items.isEmpty()) return
+        val c = tg()
+        viewModelScope.launch {
+            busy = true
+            progress = 0f
+            lastPct = -1
+            var done = 0
+            val failed = mutableListOf<String>()
+            try {
+                val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                for ((i, q) in items.withIndex()) {
+                    queueMsg = "Menyimpan ${i + 1} dari ${items.size}…"
+                    try {
+                        val f = File(q.path)
+                        if (!f.exists()) throw IllegalStateException("file sumber hilang")
+                        val text = Extractor.text(ctx, Uri.fromFile(f), q.mime, q.origName)
+                        val p = Extractor.parse(text, q.origName)
+                        val title = if (q.edited) q.name.trim().ifBlank { q.origName }
+                        else p.subject.trim().ifBlank { q.name.trim().ifBlank { q.origName } }
+                        val tg = normTags(q.tags)
+                        val upName = q.origName.replace(Regex("[/\\\\]"), "_")
+                        val total = items.size
+                        val r = Telegram.sendFile(c, upName, q.mime, f.length(), caption(title, q.category, tg), { pr -> postProgress((i + pr) / total) }) {
+                            f.inputStream()
+                        }
+                        val date = p.date.ifBlank { today }
+                        val (y, m) = yearMonthOf(date)
+                        withContext(Dispatchers.IO) {
+                            db.insert(
+                                Doc(
+                                    kind = KIND_FILE, fileName = upName, type = p.type, number = p.number.trim(),
+                                    date = date, subject = title, institution = p.institution.trim(), status = "Baru",
+                                    fileId = r.fileId, messageId = r.messageId, size = f.length(), mime = q.mime,
+                                    year = y, month = m, content = text.take(20000), category = q.category, tags = tg
+                                )
+                            )
+                            db.queueDelete(q.id)
+                            f.delete()
+                        }
+                        done++
+                    } catch (e: java.io.IOException) {
+                        failed += "${q.name}: ${Telegram.friendly(e)}"
+                        break // jaringan bermasalah: hentikan, sisanya tetap di antrean
+                    } catch (e: Exception) {
+                        failed += "${q.name}: ${Telegram.friendly(e)}"
+                    }
+                }
+            } finally {
+                busy = false
+                progress = null
+                queueMsg = null
+            }
+            val left = withContext(Dispatchers.IO) { db.queueAll() }
+            queue = left
+            if (left.isEmpty()) queueOpen = false
+            refresh()
+            message = if (failed.isEmpty()) "$done file diarsipkan ke Telegram"
+            else "$done berhasil, ${failed.size} gagal tetap di antrean. ${failed.first()}"
         }
     }
 

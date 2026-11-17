@@ -73,6 +73,8 @@ fun SettingsScreen(vm: MainVM, onPickBackup: () -> Unit) {
             )
         }
 
+        ThemePicker(vm)
+
         Text("Koneksi Telegram", style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(
             value = token, onValueChange = { token = it },

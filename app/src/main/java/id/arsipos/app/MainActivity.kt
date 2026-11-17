@@ -4,7 +4,19 @@ package id.arsipos.app
 
 import android.os.Bundle
 import android.view.WindowManager
+import android.content.Intent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Surface
+import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.ui.res.painterResource
@@ -67,7 +79,14 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { ArsipTheme { Root(vm) } }
+        setContent { ArsipTheme(vm.themeId, vm.themeMode) { Root(vm) } }
+        if (savedInstanceState == null) vm.handleShare(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        vm.handleShare(intent)
     }
 
     override fun onStart() {
@@ -105,26 +124,42 @@ fun Root(vm: MainVM) {
         }
     }
     val c = crash
-    if (c != null) {
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
-            Text("Aplikasi crash sebelumnya. Salin teks di bawah dan kirim ke pengembang.", style = MaterialTheme.typography.titleSmall)
-            Box(Modifier.weight(1f).padding(vertical = 8.dp).verticalScroll(rememberScrollState())) {
-                SelectionContainer { Text(c.take(6000), style = MaterialTheme.typography.bodySmall) }
+    val dark = LocalThemeDark.current
+    Box(Modifier.fillMaxSize()) {
+        ThemedBackground(vm.themeId, dark, vm.bgIntensity, vm.bgAnimated)
+        Surface(color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground, modifier = Modifier.fillMaxSize()) {
+            if (c != null) {
+                Column(Modifier.fillMaxSize().padding(16.dp)) {
+                    Text("Aplikasi crash sebelumnya. Salin teks di bawah dan kirim ke pengembang.", style = MaterialTheme.typography.titleSmall)
+                    Box(Modifier.weight(1f).padding(vertical = 8.dp).verticalScroll(rememberScrollState())) {
+                        SelectionContainer { Text(c.take(6000), style = MaterialTheme.typography.bodySmall) }
+                    }
+                    Button(onClick = {
+                        File(ctx.filesDir, "crash.txt").delete()
+                        crash = null
+                    }) { Text("Hapus laporan & lanjut") }
+                }
+            } else {
+                when {
+                    !vm.setupDone || vm.wizardOpen -> Panel { WizardScreen(vm) }
+                    vm.locked -> Panel { LockScreen(vm) }
+                    else -> MainScreen(vm)
+                }
             }
-            Button(onClick = {
-                File(ctx.filesDir, "crash.txt").delete()
-                crash = null
-            }) { Text("Hapus laporan & lanjut") }
         }
-        return
     }
+    if (c == null) ActionPinHost(vm)
+}
 
-    when {
-        !vm.setupDone || vm.wizardOpen -> WizardScreen(vm)
-        vm.locked -> LockScreen(vm)
-        else -> MainScreen(vm)
-    }
-    ActionPinHost(vm)
+/** Panel semi-transparan agar form tetap terbaca di atas latar bertema. */
+@Composable
+fun Panel(content: @Composable () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.fillMaxSize(),
+        content = content
+    )
 }
 
 @Composable
@@ -135,6 +170,11 @@ fun MainScreen(vm: MainVM) {
     var showNote by remember { mutableStateOf(false) }
     var showLink by remember { mutableStateOf(false) }
     var showHybrid by remember { mutableStateOf(false) }
+    var fabOpen by remember { mutableStateOf(false) }
+    val rot by animateFloatAsState(if (fabOpen) 45f else 0f, label = "fabRot")
+    val multiPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { list ->
+        if (list.size == 1) vm.pick(list.first()) else if (list.size > 1) vm.enqueue(list)
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         if (u != null) vm.pick(u)
@@ -167,6 +207,7 @@ fun MainScreen(vm: MainVM) {
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snack) },
         topBar = {
             TopAppBar(
@@ -179,14 +220,21 @@ fun MainScreen(vm: MainVM) {
                         }
                     }
                 },
+                actions = {
+                    if (vm.queue.isNotEmpty() && !vm.queueOpen) {
+                        TextButton(onClick = { vm.queueOpen = true }) {
+                            Text("📥 Antrean ${vm.queue.size}", color = Color.White)
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF1E3A8A),
+                    containerColor = LocalBarColor.current,
                     titleContentColor = Color.White
                 )
             )
         },
         bottomBar = {
-            NavigationBar {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)) {
                 NavigationBarItem(
                     selected = tab == 0, onClick = { tab = 0 },
                     icon = { Icon(Icons.Default.Home, null) }, label = { Text("Arsip") }
@@ -198,36 +246,63 @@ fun MainScreen(vm: MainVM) {
             }
         },
         floatingActionButton = {
-            if (tab == 0) {
-                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SmallFloatingActionButton(onClick = { showNote = true }) { Icon(Icons.Default.Edit, "Catat teks") }
-                    SmallFloatingActionButton(onClick = { showLink = true }) { Text("🔗") }
-                    FloatingActionButton(onClick = {
-                        picker.launch(
-                            arrayOf(
-                                "application/pdf",
-                                "application/msword",
-                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                "application/vnd.ms-excel",
-                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                "application/vnd.ms-powerpoint",
-                                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                "application/zip",
-                                "application/vnd.rar",
-                                "application/x-rar-compressed",
-                                "image/*"
+            if (tab == 0 && !vm.queueOpen) {
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AnimatedVisibility(
+                        visible = fabOpen,
+                        enter = fadeIn() + slideInVertically { it / 2 } + expandVertically(),
+                        exit = fadeOut() + slideOutVertically { it / 2 } + shrinkVertically()
+                    ) {
+                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ExtendedFloatingActionButton(
+                                text = { Text("Simpan tautan") }, icon = { Text("🔗") },
+                                onClick = { fabOpen = false; showLink = true }
                             )
-                        )
-                    }) { Icon(Icons.Default.Add, "Unggah") }
+                            ExtendedFloatingActionButton(
+                                text = { Text("Catat teks") }, icon = { Icon(Icons.Default.Edit, null) },
+                                onClick = { fabOpen = false; showNote = true }
+                            )
+                            ExtendedFloatingActionButton(
+                                text = { Text("Impor massal") }, icon = { Text("📥") },
+                                onClick = { fabOpen = false; multiPicker.launch(arrayOf("*/*")) }
+                            )
+                            ExtendedFloatingActionButton(
+                                text = { Text("Unggah file") }, icon = { Icon(Icons.Default.Add, null) },
+                                onClick = {
+                                    fabOpen = false
+                                    picker.launch(
+                                        arrayOf(
+                                            "application/pdf",
+                                            "application/msword",
+                                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                            "application/vnd.ms-excel",
+                                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            "application/vnd.ms-powerpoint",
+                                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                            "application/zip",
+                                            "application/vnd.rar",
+                                            "application/x-rar-compressed",
+                                            "image/*"
+                                        )
+                                    )
+                                }
+                            )
+                        }
+                    }
+                    FloatingActionButton(onClick = { fabOpen = !fabOpen }) {
+                        Icon(Icons.Default.Add, "Menu tambah", Modifier.rotate(rot))
+                    }
                 }
             }
         }
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
-            if (tab == 0) {
+            if (tab == 0 && vm.queueOpen) {
+                QueueScreen(vm)
+            } else if (tab == 0) {
                 ArchiveScreen(vm)
             } else if (vm.settingsUnlocked) {
-                SettingsScreen(vm) { restorePicker.launch(arrayOf("*/*")) }
+                Panel { SettingsScreen(vm) { restorePicker.launch(arrayOf("*/*")) } }
             } else {
                 SettingsGate(vm) { tab = 0 }
             }
@@ -239,6 +314,14 @@ fun MainScreen(vm: MainVM) {
     vm.oversize?.let { OversizeDialog(vm, it) { showHybrid = true } }
     if (showHybrid) HybridDialog(vm) { showHybrid = false }
     if (showNote) NoteDialog(vm) { showNote = false }
+    vm.sharedText?.let { st ->
+        val u = st.url
+        if (u != null) {
+            LinkDialog(vm, st.subject, u, st.text.replace(u, "").trim()) { vm.sharedText = null }
+        } else {
+            NoteDialog(vm, st.subject, st.text) { vm.sharedText = null }
+        }
+    }
     if (showLink) LinkDialog(vm) { showLink = false }
     vm.detail?.let { DetailDialog(vm, it) }
     vm.editing?.let { EditDialog(vm, it) }

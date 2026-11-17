@@ -87,6 +87,8 @@ private fun describe(d: Doc): String {
 @Composable
 fun ArchiveScreen(vm: MainVM) {
     Column(Modifier.fillMaxSize()) {
+        androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f), modifier = Modifier.fillMaxWidth()) {
+        Column {
         OutlinedTextField(
             value = vm.query,
             onValueChange = { vm.query = it; vm.refresh() },
@@ -135,6 +137,8 @@ fun ArchiveScreen(vm: MainVM) {
                 vm.statusFilter = if (it == "Semua") null else it; vm.refresh()
             }
         }
+        }
+        }
         if (vm.docs.isEmpty()) {
             Column(
                 Modifier.fillMaxWidth().padding(32.dp),
@@ -155,7 +159,12 @@ fun ArchiveScreen(vm: MainVM) {
                 items(vm.docs, key = { it.id }) { d ->
                     val cat = vm.categories.firstOrNull { it.name == d.category }
                     ListItem(
-                        modifier = Modifier.clickable { vm.openDetail(d) },
+                        colors = androidx.compose.material3.ListItemDefaults.colors(
+                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f)
+                        ),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                            .clickable { vm.openDetail(d) },
                         leadingContent = {
                             Box(
                                 Modifier.size(40.dp).clip(CircleShape)
@@ -331,9 +340,9 @@ fun DraftDialog(vm: MainVM, d: Draft) {
 }
 
 @Composable
-fun NoteDialog(vm: MainVM, onDismiss: () -> Unit) {
-    var title by remember { mutableStateOf("") }
-    var body by remember { mutableStateOf("") }
+fun NoteDialog(vm: MainVM, initTitle: String = "", initBody: String = "", onDismiss: () -> Unit) {
+    var title by remember { mutableStateOf(initTitle) }
+    var body by remember { mutableStateOf(initBody) }
     var category by remember { mutableStateOf("") }
     var tags by remember { mutableStateOf("") }
     var send by remember { mutableStateOf(true) }
@@ -364,10 +373,10 @@ fun NoteDialog(vm: MainVM, onDismiss: () -> Unit) {
 }
 
 @Composable
-fun LinkDialog(vm: MainVM, onDismiss: () -> Unit) {
-    var title by remember { mutableStateOf("") }
-    var url by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
+fun LinkDialog(vm: MainVM, initTitle: String = "", initUrl: String = "", initNote: String = "", onDismiss: () -> Unit) {
+    var title by remember { mutableStateOf(initTitle) }
+    var url by remember { mutableStateOf(initUrl) }
+    var note by remember { mutableStateOf(initNote) }
     var category by remember { mutableStateOf("") }
     var tags by remember { mutableStateOf("") }
     var send by remember { mutableStateOf(true) }

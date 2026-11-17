@@ -77,6 +77,18 @@ class SecureStore(ctx: Context) {
     var secureScreen: Boolean
         get() = sp.getBoolean("secure_screen", false)
         set(v) = sp.edit().putBoolean("secure_screen", v).apply()
+    var themeId: String
+        get() = sp.getString("theme_id", "classic") ?: "classic"
+        set(v) = sp.edit().putString("theme_id", v).apply()
+    var themeMode: Int
+        get() = sp.getInt("theme_mode", 0)
+        set(v) = sp.edit().putInt("theme_mode", v).apply()
+    var bgIntensity: Float
+        get() = sp.getFloat("bg_intensity", 0.8f)
+        set(v) = sp.edit().putFloat("bg_intensity", v).apply()
+    var bgAnimated: Boolean
+        get() = sp.getBoolean("bg_animated", true)
+        set(v) = sp.edit().putBoolean("bg_animated", v).apply()
     val ready: Boolean get() = token.isNotBlank() && chatId.isNotBlank()
 
     // ---------- PIN ----------

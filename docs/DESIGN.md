@@ -27,3 +27,6 @@ Roboto sistem; judul SemiBold. Sudut: 8 / 12 / 20 / 28 dp. Implementasi: `Theme.
 
 ## Komponen
 Top bar navy tetap dengan logo + status koneksi (hijau/merah/abu-abu); ikon kategori dalam lingkaran berwarna kategori (alpha 18%); keadaan kosong dengan ilustrasi.
+
+## Tema (v2.2.0)
+4 tema: Klasik, Alam, Luar Angkasa (selalu gelap), Samudra. Latar digambar prosedural (Canvas, tanpa aset); intensitas & animasi dapat diatur. Panel/kartu semi-transparan menjaga kontras teks.

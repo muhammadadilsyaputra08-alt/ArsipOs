@@ -11,7 +11,14 @@
   "known_issues": [
     "Belum dikompilasi/diuji di perangkat (sandbox tanpa Android SDK)",
     "dependency-audit: SKIPPED",
-    "Tes E2E belum ada"
+    "Tes E2E belum ada",
+    "v2.2.0 belum dikompilasi di sandbox; menunggu hasil CI"
   ],
-  "last_updated": "2026-11-14"
+  "last_updated": "2026-11-14",
+  "version": "2.2.0",
+  "completed_features": [
+    "Tema (Klasik/Alam/Luar Angkasa/Samudra) + latar animasi prosedural",
+    "Send Intent SEND/SEND_MULTIPLE + Import Queue (DB v3)",
+    "Speed-dial FAB + impor massal"
+  ]
 }

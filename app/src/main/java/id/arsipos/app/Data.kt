@@ -75,6 +75,20 @@ data class Draft(
     val tags: String = ""
 )
 
+/** Item antrean impor (file dari aplikasi luar, sudah disalin ke storage internal). */
+data class QueueItem(
+    val id: Long = 0,
+    val path: String,
+    val origName: String,
+    val name: String,
+    val mime: String,
+    val size: Long,
+    val category: String = "",
+    val tags: String = "",
+    val edited: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 /** Normalisasi tag: "Keuangan, 2026 #Penting" -> "#keuangan #2026 #penting". */
 fun normTags(raw: String): String =
     raw.split(Regex("[\\s,]+"))
@@ -83,7 +97,7 @@ fun normTags(raw: String): String =
         .distinct()
         .joinToString(" ") { "#$it" }
 
-class ArchiveDb(ctx: Context) : SQLiteOpenHelper(ctx, "arsip.db", null, 2) {
+class ArchiveDb(ctx: Context) : SQLiteOpenHelper(ctx, "arsip.db", null, 3) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -108,6 +122,16 @@ class ArchiveDb(ctx: Context) : SQLiteOpenHelper(ctx, "arsip.db", null, 2) {
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_docs_kind ON docs(kind)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_docs_ym ON docs(year, month)")
+        createQueue(db)
+    }
+
+    private fun createQueue(db: SQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS queue(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, orig_name TEXT, name TEXT,
+                mime TEXT, size INTEGER, status TEXT DEFAULT 'PENDING', category TEXT DEFAULT '',
+                tags TEXT DEFAULT '', edited INTEGER DEFAULT 0, created_at INTEGER)"""
+        )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -125,6 +149,52 @@ class ArchiveDb(ctx: Context) : SQLiteOpenHelper(ctx, "arsip.db", null, 2) {
                     "SELECT id, file_name, doc_type, doc_number, subject, institution, content, tags, category, link_url FROM docs"
             )
         }
+        if (oldVersion < 3) createQueue(db)
+    }
+
+    // ---------- Antrean impor ----------
+
+    fun queueAdd(q: QueueItem): Long {
+        val cv = ContentValues().apply {
+            put("path", q.path); put("orig_name", q.origName); put("name", q.name); put("mime", q.mime)
+            put("size", q.size); put("status", "PENDING"); put("category", q.category); put("tags", q.tags)
+            put("edited", if (q.edited) 1 else 0); put("created_at", q.createdAt)
+        }
+        return writableDatabase.insertOrThrow("queue", null, cv)
+    }
+
+    fun queueAll(): List<QueueItem> {
+        val out = mutableListOf<QueueItem>()
+        readableDatabase.rawQuery(
+            "SELECT id, path, orig_name, name, mime, size, category, tags, edited, created_at FROM queue WHERE status='PENDING' ORDER BY id", null
+        ).use { c ->
+            while (c.moveToNext()) {
+                out += QueueItem(
+                    c.getLong(0), c.getString(1) ?: "", c.getString(2) ?: "", c.getString(3) ?: "",
+                    c.getString(4) ?: "", c.getLong(5), c.getString(6) ?: "", c.getString(7) ?: "",
+                    c.getInt(8) == 1, c.getLong(9)
+                )
+            }
+        }
+        return out
+    }
+
+    fun queueUpdate(q: QueueItem) {
+        val cv = ContentValues().apply {
+            put("name", q.name); put("category", q.category); put("tags", q.tags); put("edited", if (q.edited) 1 else 0)
+        }
+        writableDatabase.update("queue", cv, "id=?", arrayOf(q.id.toString()))
+    }
+
+    fun queueDelete(id: Long) {
+        writableDatabase.delete("queue", "id=?", arrayOf(id.toString()))
+    }
+
+    fun queueBulk(category: String?, tags: String?) {
+        val cv = ContentValues()
+        if (category != null) cv.put("category", category)
+        if (tags != null) cv.put("tags", tags)
+        if (cv.size() > 0) writableDatabase.update("queue", cv, "status='PENDING'", null)
     }
 
     // ---------- CRUD ----------
