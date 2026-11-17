@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,14 +48,14 @@ fun ThemePicker(vm: MainVM) {
         ) {
             THEMES.forEach { t ->
                 val sel = t.id == vm.themeId
-                val border by animateColorAsState(
+                val edge by animateColorAsState(
                     if (sel) MaterialTheme.colorScheme.primary else Color.Transparent, label = "tb"
                 )
                 val sc by animateFloatAsState(if (sel) 1f else 0.94f, label = "ts")
                 Box(
                     Modifier.width(112.dp).height(160.dp).scale(sc)
                         .clip(RoundedCornerShape(18.dp))
-                        .border(BorderStroke(3.dp, border), RoundedCornerShape(18.dp))
+                        .border(BorderStroke(3.dp, edge), RoundedCornerShape(18.dp))
                         .clickable {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             vm.chooseTheme(t.id)
